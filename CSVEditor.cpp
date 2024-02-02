@@ -1,9 +1,12 @@
 #include "CSVEditor.h"
 
 CSVEditor::CSVEditor(String fileName, int chipSelectPin, bool debug)
-    : fileName(fileName), chipSelectPin(chipSelectPin) {
-  CSVEditor::debug = debug;
-  initializeSDCard();
+    : fileName(fileName), chipSelectPin(chipSelectPin), debug(debug) {
+  if (!SD.begin(chipSelectPin)) {
+    debugMessage("SD card initialization failed!");
+    return;
+  }
+  debugMessage("SD card initialization done.");
 }
 
 CSVEditor::~CSVEditor() {
@@ -17,11 +20,10 @@ void CSVEditor::writeHeader(String header) {
 }
 
 void CSVEditor::writeData(String data) {
-  if (openFile(WRITE)) {
+  if (openFile(FILE_WRITE)) {
     dataFile.println(data);
-    debugMessage("Data written");
-    checkAndHandleFileSize();
     closeFile();
+    debugMessage("Data written");
   } else {
     debugMessage("Error opening file to write data");
   }
@@ -29,8 +31,13 @@ void CSVEditor::writeData(String data) {
 
 String CSVEditor::readLastRow() {
   String lastLine = "";
-  if (openFile(READ)) {
-    lastLine = getLastLine();
+  if (openFile(FILE_READ)) {
+    while (dataFile.available()) {
+      String line = dataFile.readStringUntil('\n');
+      if (line.length() > 0) {
+        lastLine = line;
+      }
+    }
     closeFile();
   } else {
     debugMessage("Error opening file to read");
@@ -39,12 +46,31 @@ String CSVEditor::readLastRow() {
 }
 
 void CSVEditor::checkAndHandleFileSize() {
-  if (openFile(READ)) {
+  if (openFile(FILE_READ)) {
     size_t fileSize = dataFile.size();
-    closeFile();
-    if (fileSize > MAX_FILE_SIZE) {
-      handleFileSizeExceeded();
+    if (fileSize > MAX_FILE_SIZE) {  // Define MAX_FILE_SIZE as per your needs
+      String header = readHeader();
+      String lastRow = readLastRow();
+      String newFileName = "new_" + fileName;
+      dataFile.close();
+
+      // Create new file and write header and last row
+      fileName = newFileName;
+      writeHeader(header);
+      writeData(lastRow);
+
+      // Rename old file
+      String oldFileName = fileName;
+      int commaIndex = lastRow.indexOf(',');
+      if (commaIndex != -1) {
+        oldFileName = lastRow.substring(0, commaIndex);
+      }
+      renameFile(dataFile, fileName, oldFileName);
+
+      // Rename new file to original file name
+      renameFile(dataFile, newFileName, fileName);
     }
+    closeFile();
   } else {
     debugMessage("Error opening file to check size");
   }
@@ -52,7 +78,7 @@ void CSVEditor::checkAndHandleFileSize() {
 
 String CSVEditor::readHeader() {
   String header = "";
-  if (openFile(READ)) {
+  if (openFile(FILE_READ)) {
     header = dataFile.readStringUntil('\n');
     closeFile();
   } else {
@@ -61,23 +87,11 @@ String CSVEditor::readHeader() {
   return header;
 }
 
-void CSVEditor::setDebug(bool debugValue) {
-  debug = debugValue;
-}
-
-void CSVEditor::initializeSDCard() {
-  if (!SD.begin(chipSelectPin)) {
-    debugMessage("SD card initialization failed!");
-    return;
-  }
-  debugMessage("SD card initialization done.");
-}
-
-bool CSVEditor::openFile(FileMode mode) {
+bool CSVEditor::openFile(uint8_t mode) {
   if (dataFile) {
     dataFile.close();
   }
-  dataFile = SD.open(fileName, static_cast<uint8_t>(mode));
+  dataFile = SD.open(fileName, mode);
   return dataFile;
 }
 
@@ -87,43 +101,29 @@ void CSVEditor::closeFile() {
   }
 }
 
-void CSVEditor::debugMessage(String message) {
+bool CSVEditor::renameFile(File &file, const String &oldName, const String &newName) {
+  if (SD.exists(newName)) {
+    SD.remove(newName);
+  }
+  file.close();
+  file = SD.open(oldName);
+  if (!file) {
+    return false;
+  }
+  File newFile = SD.open(newName, FILE_WRITE);
+  if (!newFile) {
+    return false;
+  }
+  while (file.available()) {
+    newFile.write(file.read());
+  }
+  newFile.close();
+  file.close();
+  return SD.remove(oldName);
+}
+
+void CSVEditor::debugMessage(const String &message) {
   if (debug) {
     Serial.println(message);
   }
 }
-
-String CSVEditor::getLastLine() {
-  String lastLine = "";
-  char ch;
-  for (int seekPos = dataFile.size() - 1; seekPos >= 0; seekPos--) {
-    dataFile.seek(seekPos);
-    ch = dataFile.read();
-    if (ch == '\n' && lastLine.length() > 0) {
-      break;
-    }
-    lastLine = ch + lastLine;
-  }
-  return lastLine;
-}
-
-void CSVEditor::handleFileSizeExceeded() {
-  String header = readHeader();
-  String lastRow = readLastRow();
-  String newFileName = "new_" + fileName;
-
-  fileName = newFileName;
-  writeHeader(header);
-  writeData(lastRow);
-
-  String oldFileName = fileName;
-  int commaIndex = lastRow.indexOf(',');
-  if (commaIndex != -1) {
-    oldFileName = lastRow.substring(0, commaIndex);
-  }
-  SD.rename(fileName, oldFileName);
-
-  SD.rename(newFileName, fileName);
-}
-
-bool CSVEditor::debug = false;
