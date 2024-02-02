@@ -2,18 +2,19 @@
 #define CSVEditor_h
 
 #include "Arduino.h"
-#include <SD.h>
-
-#define MAX_FILE_SIZE 1000000
-
-enum FileMode { READ = FILE_READ, WRITE = FILE_WRITE };
+#include "SD.h"
 
 class CSVEditor {
 private:
   File dataFile;
   String fileName;
   int chipSelectPin;
-  static bool debug;
+  bool debug;
+
+  bool openFile(uint8_t mode);
+  void closeFile();
+  bool renameFile(File &file, const String &oldName, const String &newName);
+  void debugMessage(const String &message);
 
 public:
   CSVEditor(String fileName, int chipSelectPin, bool debug = false);
@@ -24,15 +25,6 @@ public:
   String readLastRow();
   void checkAndHandleFileSize();
   String readHeader();
-  static void setDebug(bool debugValue);
-
-private:
-  void initializeSDCard();
-  bool openFile(FileMode mode);
-  void closeFile();
-  void debugMessage(String message);
-  String getLastLine();
-  void handleFileSizeExceeded();
 };
 
 #endif
